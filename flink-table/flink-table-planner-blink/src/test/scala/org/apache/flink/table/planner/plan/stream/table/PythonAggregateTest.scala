@@ -21,12 +21,12 @@ package org.apache.flink.table.planner.plan.stream.table
 import org.apache.flink.api.java.tuple.Tuple1
 import org.apache.flink.api.scala._
 import org.apache.flink.table.api._
-import org.apache.flink.table.api.dataview.ListView
-import org.apache.flink.table.planner.plan.nodes.common.CommonPythonAggregate
+import org.apache.flink.table.api.dataview.{ListView, MapView}
+import org.apache.flink.table.planner.plan.nodes.exec.utils.CommonPythonUtil
 import org.apache.flink.table.planner.runtime.utils.JavaUserDefinedAggFunctions.TestPythonAggregateFunction
-import org.apache.flink.table.planner.typeutils.DataViewUtils.{DataViewSpec, ListViewSpec}
+import org.apache.flink.table.planner.typeutils.DataViewUtils.{ListViewSpec, MapViewSpec}
 import org.apache.flink.table.planner.utils.TableTestBase
-import org.apache.flink.table.types.DataType
+
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -40,7 +40,7 @@ class PythonAggregateTest extends TableTestBase {
 
     val resultTable = sourceTable.select(func('a, 'c))
 
-    util.verifyPlan(resultTable)
+    util.verifyExecPlan(resultTable)
   }
 
   @Test
@@ -52,10 +52,10 @@ class PythonAggregateTest extends TableTestBase {
     val resultTable = sourceTable.groupBy('b)
       .select('b, func('a, 'c))
 
-    util.verifyPlan(resultTable)
+    util.verifyExecPlan(resultTable)
   }
 
-  @Test(expected = classOf[TableException])
+  @Test
   def testMixedUsePythonAggAndJavaAgg(): Unit = {
     val util = streamTestUtil()
     val sourceTable = util.addTableSource[(Int, Long, Int)]("MyTable", 'a, 'b, 'c)
@@ -64,27 +64,38 @@ class PythonAggregateTest extends TableTestBase {
     val resultTable = sourceTable.groupBy('b)
       .select('b, func('a, 'c), 'a.count())
 
-    util.verifyPlan(resultTable)
+    util.verifyExecPlan(resultTable)
   }
 
   @Test
   def testExtractDataViewSpecs(): Unit = {
     val accType = DataTypes.ROW(
       DataTypes.FIELD("f0", DataTypes.STRING()),
-      DataTypes.FIELD("f1", ListView.newListViewDataType(DataTypes.STRING())))
+      DataTypes.FIELD("f1", ListView.newListViewDataType(DataTypes.STRING())),
+      DataTypes.FIELD("f2", MapView.newMapViewDataType(DataTypes.STRING(), DataTypes.BIGINT())))
 
-    val specs = TestCommonPythonAggregate.extractDataViewSpecs(accType)
+    val specs = CommonPythonUtil.extractDataViewSpecs(0, accType)
 
     val expected = Array(
       new ListViewSpec(
         "agg0$f1",
         1,
-        DataTypes.ARRAY(DataTypes.STRING()).bridgedTo(classOf[java.util.List[_]])))
+        DataTypes.ARRAY(DataTypes.STRING()).bridgedTo(classOf[java.util.List[_]])),
+      new MapViewSpec(
+        "agg0$f2",
+        2,
+        DataTypes.MAP(
+          DataTypes.STRING(), DataTypes.BIGINT()).bridgedTo(classOf[java.util.Map[_, _]]),
+        false))
 
     assertEquals(expected(0).getClass, specs(0).getClass)
     assertEquals(expected(0).getDataType, specs(0).getDataType)
     assertEquals(expected(0).getStateId, specs(0).getStateId)
     assertEquals(expected(0).getFieldIndex, specs(0).getFieldIndex)
+    assertEquals(expected(1).getClass, specs(1).getClass)
+    assertEquals(expected(1).getDataType, specs(1).getDataType)
+    assertEquals(expected(1).getStateId, specs(1).getStateId)
+    assertEquals(expected(1).getFieldIndex, specs(1).getFieldIndex)
   }
 
   @Test(expected = classOf[TableException])
@@ -92,7 +103,7 @@ class PythonAggregateTest extends TableTestBase {
     val accType = DataTypes.ROW(
       DataTypes.FIELD("f0", DataTypes.ROW(
         DataTypes.FIELD("f0", ListView.newListViewDataType(DataTypes.STRING())))))
-    TestCommonPythonAggregate.extractDataViewSpecs(accType)
+    CommonPythonUtil.extractDataViewSpecs(0, accType)
   }
 
   @Test(expected = classOf[TableException])
@@ -100,12 +111,6 @@ class PythonAggregateTest extends TableTestBase {
     val accType = DataTypes.STRUCTURED(
       classOf[Tuple1[_]],
       DataTypes.FIELD("f0", ListView.newListViewDataType(DataTypes.STRING())))
-    TestCommonPythonAggregate.extractDataViewSpecs(accType)
-  }
-}
-
-object TestCommonPythonAggregate extends CommonPythonAggregate {
-  def extractDataViewSpecs(accType: DataType): Array[DataViewSpec] = {
-    extractDataViewSpecs(0, accType)
+    CommonPythonUtil.extractDataViewSpecs(0, accType)
   }
 }

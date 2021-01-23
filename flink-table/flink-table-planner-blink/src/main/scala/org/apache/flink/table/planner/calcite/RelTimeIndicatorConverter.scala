@@ -165,6 +165,10 @@ class RelTimeIndicatorConverter(rexBuilder: RexBuilder) extends RelShuttle {
       val input = snapshot.getInput.accept(this)
       snapshot.copy(snapshot.getTraitSet, input, snapshot.getPeriod)
 
+    case rank: LogicalRank =>
+      val input = rank.getInput.accept(this)
+      rank.copy(rank.getTraitSet, JCollections.singletonList(input))
+
     case sink: LogicalSink =>
       val newInput = convertSinkInput(sink.getInput)
       new LogicalSink(
@@ -237,8 +241,8 @@ class RelTimeIndicatorConverter(rexBuilder: RexBuilder) extends RelShuttle {
     val left = join.getLeft.accept(this)
     val right = join.getRight.accept(this)
 
+    // temporal table join
     if (TemporalJoinUtil.containsTemporalJoinCondition(join.getCondition)) {
-      // temporal table function join
       val rewrittenTemporalJoin = join.copy(join.getTraitSet, List(left, right))
 
       // Materialize all of the time attributes from the right side of temporal join
